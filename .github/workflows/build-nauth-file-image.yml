@@ -1,0 +1,54 @@
+name: Build nauth-file image
+
+# Builds Dockerfile.file and pushes it to ghcr.io/narratidev/nauth-file, tagged
+# with the commit's short hash. Pull requests from this repository push too,
+# so an image can be tried before merge. A pull request from another fork
+# only builds: its token cannot push.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PUSH: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The commit the tag names, not the merge commit GitHub builds by default.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Tag
+        id: tag
+        env:
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "tag=ghcr.io/narratidev/nauth-file:${COMMIT::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: Dockerfile.file
+          platforms: linux/amd64
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.tag.outputs.tag }}
+          # Only main writes the cache; pull requests read it.
+          cache-from: type=gha,scope=nauth-file
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max,scope=nauth-file' || '' }}
